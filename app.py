@@ -77,9 +77,9 @@ def get_data(mode, uploaded_file):
 @st.cache_data
 def data_prep(mode, data: pd.DataFrame) -> pd.DataFrame:
     if mode == "📱 Mobile":
-        # fitur turunan kepadatan gerai; UMR sengaja dibuang (analisis: UMR menurunkan performa)
+        # fitur turunan kepadatan gerai; HDI & PDRB diganti UMR
         data["Gerai Density"] = data["Jumlah Gerai"] / data["Luas WOK"]
-        data = data.drop(columns=["UMR"], errors="ignore")
+        data = data.drop(columns=["HDI", "PDRB"], errors="ignore")
     else:
         data["Kepadatan Gerai"] = np.log(data["Jumlah Gerai"] / data["Luas WOK"])
         data["Kepadatan Kepala Keluarga"] = np.log(
@@ -674,8 +674,7 @@ with tab3:
             "Jumlah Mitra",
             "Jumlah Customer Base",
             "Total Kecamatan",
-            "HDI",
-            "PDRB",
+            "UMR",
             "Gerai Density",
         ]
         medians = preped_data[mobile_features].median()
@@ -730,19 +729,11 @@ with tab3:
                     value=int(medians["Total Kecamatan"]),
                     step=1,
                 )
-                hdi = st.number_input(
-                    "HDI (_Human Development Index_)",
+                umr = st.number_input(
+                    "UMR (Rupiah)",
                     min_value=0.0,
-                    max_value=100.0,
-                    value=float(medians["HDI"]),
-                    step=0.01,
-                    format="%.2f",
-                )
-                pdrb = st.number_input(
-                    "PDRB per Kapita",
-                    min_value=0.0,
-                    value=float(medians["PDRB"]),
-                    step=0.1,
+                    value=float(medians["UMR"]),
+                    step=float(1e4),
                 )
 
             submitted = st.form_submit_button(
@@ -763,8 +754,7 @@ with tab3:
                     "Jumlah Mitra": mitra,
                     "Jumlah Customer Base": cb,
                     "Total Kecamatan": kecamatan,
-                    "HDI": hdi,
-                    "PDRB": pdrb,
+                    "UMR": umr,
                     "Gerai Density": gerai_density,
                 }
 
