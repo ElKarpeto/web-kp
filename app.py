@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,23 +13,30 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
+from sklearn.compose import TransformedTargetRegressor
 
 # ! const data
 # TODO: masukin yang mobile boloo
-MOBILE_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "")
+MOBILE_DATA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data/mobile/data-web.csv"
+)
 HH_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data/household/data-web.csv"
 )
 
 # TODO: masukin yang mobile boloo
-MOBILE_WOK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "")
+MOBILE_WOK_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data/mobile/WOK.csv"
+)
 HH_WOK_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data/household/WOK.csv"
 )
 
 COOR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data/KOTA.csv")
 
-MOBILE_EXCEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "")
+MOBILE_EXCEL = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data/mobile/excel-web.xlsx"
+)
 HH_EXCEL = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data/household/excel-web.xlsx"
 )
@@ -46,23 +54,34 @@ def load_excel(path: str) -> pd.DataFrame:
     return pd.read_excel(path)
 
 
+def _clean_wok_label(series: pd.Series) -> pd.Series:
+    # gabung daftar kota multi-baris jadi satu baris "A / B / C"
+    return series.apply(
+        lambda v: " / ".join(s.strip() for s in re.split(r"[\r\n]+", str(v)) if s.strip())
+    )
+
+
 def get_data(mode, uploaded_file):
     if mode == "📱 Mobile":
-        default_path = MOBILE_DATA_PATH
-    else:
-        default_path = HH_DATA_PATH
+        if uploaded_file is not None:
+            data = pd.read_excel(uploaded_file)
+        else:
+            data = load_csv(MOBILE_DATA_PATH)
+        data["WOK"] = _clean_wok_label(data["WOK"])
+        return data
 
     if uploaded_file is not None:
         return pd.read_excel(uploaded_file)
 
-    return load_csv(default_path)
+    return load_csv(HH_DATA_PATH)
 
 
 @st.cache_data
 def data_prep(mode, data: pd.DataFrame) -> pd.DataFrame:
     if mode == "📱 Mobile":
-        # TODO: langsung feature engineering sama preprocessing semua disini, outputnya langsung semua kolom yang dipake aja
-        pass
+        # fitur turunan kepadatan gerai; UMR sengaja dibuang (analisis: UMR menurunkan performa)
+        data["Gerai Density"] = data["Jumlah Gerai"] / data["Luas WOK"]
+        data = data.drop(columns=["UMR"], errors="ignore")
     else:
         data["Kepadatan Gerai"] = np.log(data["Jumlah Gerai"] / data["Luas WOK"])
         data["Kepadatan Kepala Keluarga"] = np.log(
@@ -92,8 +111,14 @@ def train_loocv(mode, data: pd.DataFrame):
     loo = LeaveOneOut()
 
     if mode == "📱 Mobile":
-        # TODO: buat pipeline boloo, biar training nya sama kita
-        pass
+        # OLS + Log(Y): StandardScaler -> LinearRegression, target di-log lalu di-exp balik
+        pipeline = TransformedTargetRegressor(
+            regressor=Pipeline(
+                [("scaler", StandardScaler()), ("model", LinearRegression())]
+            ),
+            func=np.log,
+            inverse_func=np.exp,
+        )
     else:
         pipeline = Pipeline(
             [
@@ -123,8 +148,13 @@ def train_full(mode, data: pd.DataFrame):
     y = data["Jumlah Karyawan"]
 
     if mode == "📱 Mobile":
-        # TODO: buat pipeline boloo
-        pass
+        pipeline = TransformedTargetRegressor(
+            regressor=Pipeline(
+                [("scaler", StandardScaler()), ("model", LinearRegression())]
+            ),
+            func=np.log,
+            inverse_func=np.exp,
+        )
     else:
         pipeline = Pipeline(
             [
@@ -154,6 +184,36 @@ def _wok_coor(path_wok, coor_path):
         wok_coor_dict[w] = (c["Lintang"], c["Bujur"])
 
     return wok_coor_dict
+
+
+# samakan ejaan kota mobile dengan KOTA.csv
+_KOTA_FIX = {"KARANGASEM": "KARANG ASEM", "KOTA SURAKARTA (SOLO)": "KOTA SURAKARTA"}
+
+
+def _norm_kota(s: str) -> str:
+    s = str(s).strip().upper()
+    return _KOTA_FIX.get(s, s)
+
+
+@st.cache_data
+def _mobile_wok_coor(data: pd.DataFrame, coor_path):
+    # koordinat tiap WOK = rata-rata koordinat kota-kotanya (label WOK = "A / B / C")
+    coor = load_csv(coor_path)
+    canon = {
+        _norm_kota(k): (lat, lon)
+        for k, lat, lon in zip(coor["Kota"], coor["Lintang"], coor["Bujur"])
+    }
+
+    result = {}
+    for cell in data["WOK"].unique():
+        kotas = [_norm_kota(x) for x in str(cell).split(" / ") if x.strip()]
+        pts = [canon[k] for k in kotas if k in canon]
+        if pts:
+            result[cell] = (
+                float(np.mean([p[0] for p in pts])),
+                float(np.mean([p[1] for p in pts])),
+            )
+    return result
 
 
 def build_geo_df(labels, aktual, prediksi, wok_coor):
@@ -227,7 +287,7 @@ st.markdown("Prediksi kebutuhan karyawan per WOK (Wilayah Operasional)")
 
 # select mode
 mode = st.segmented_control(
-    "Sektor", ["📱 Mobile", "🏠 Household"], default="🏠 Household"
+    "Sektor", ["📱 Mobile", "🏠 Household"], default="🏠 Household", key="sektor_mode"
 )
 
 st.divider()
@@ -477,11 +537,7 @@ with tab1:
     )
     st.plotly_chart(fig, width="stretch")
 
-    if mode == "📱 Mobile":
-        # TODO: tambahin logic untuk mobile
-        pass
-    else:
-        pass
+    # grafik dashboard di atas dipakai bersama oleh mode Household & Mobile
 
 with tab2:
     # performa prediksi
@@ -584,8 +640,16 @@ with tab2:
     st.subheader("Peta Prediksi")
 
     if mode == "📱 Mobile":
-        # TODO: tambahin logic untuk mobile
-        pass
+        wok_coor = _mobile_wok_coor(df, COOR_PATH)
+        _geo = build_geo_df(df["WOK"], y_true, np.round(y_pred), wok_coor)
+        st.plotly_chart(
+            make_map(
+                _geo,
+                "Jumlah Karyawan Prediksi",
+                "Oranges",
+            ),
+            width="stretch",
+        )
     else:
         wok_coor = _wok_coor(HH_WOK_PATH, COOR_PATH)
         _geo = build_geo_df(df["WOK"], y_true, np.round(y_pred), wok_coor)
@@ -604,8 +668,116 @@ with tab3:
         "Masukkan data karakteristik WOK untuk mendapatkan estimasi jumlah karyawan yang direkomendasikan oleh model."
     )
     if mode == "📱 Mobile":
-        # TODO: tambahin logic untuk mobile
-        pass
+        mobile_features = [
+            "Revenue",
+            "Luas WOK",
+            "Jumlah Penduduk (Jiwa)",
+            "Jumlah Gerai",
+            "Jumlah Mitra",
+            "Jumlah Customer Base",
+            "Total Kecamatan",
+            "HDI",
+            "PDRB",
+            "Gerai Density",
+        ]
+        medians = preped_data[mobile_features].median()
+
+        with st.form("form_mobile"):
+            col_form1, col_form2, col_form3 = st.columns(3)
+
+            with col_form1:
+                revenue = st.number_input(
+                    "Revenue Mobile (Miliar)",
+                    min_value=0.0,
+                    value=float(medians["Revenue"]),
+                    step=1.0,
+                )
+                luas = st.number_input(
+                    "Luas WOK (KM²)",
+                    min_value=0.01,
+                    value=float(medians["Luas WOK"]),
+                    step=1.0,
+                )
+                penduduk = st.number_input(
+                    "Jumlah Penduduk (Jiwa)",
+                    min_value=0,
+                    value=int(medians["Jumlah Penduduk (Jiwa)"]),
+                    step=1000,
+                )
+
+            with col_form2:
+                gerai = st.number_input(
+                    "Jumlah Gerai (GraPARI)",
+                    min_value=0,
+                    value=int(medians["Jumlah Gerai"]),
+                    step=1,
+                )
+                mitra = st.number_input(
+                    "Jumlah Mitra",
+                    min_value=0,
+                    value=int(medians["Jumlah Mitra"]),
+                    step=1,
+                )
+                cb = st.number_input(
+                    "Jumlah _Customer Base_ (Pelanggan)",
+                    min_value=0,
+                    value=int(medians["Jumlah Customer Base"]),
+                    step=1000,
+                )
+
+            with col_form3:
+                kecamatan = st.number_input(
+                    "Total Kecamatan",
+                    min_value=0,
+                    value=int(medians["Total Kecamatan"]),
+                    step=1,
+                )
+                hdi = st.number_input(
+                    "HDI (_Human Development Index_)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=float(medians["HDI"]),
+                    step=0.01,
+                    format="%.2f",
+                )
+                pdrb = st.number_input(
+                    "PDRB per Kapita",
+                    min_value=0.0,
+                    value=float(medians["PDRB"]),
+                    step=0.1,
+                )
+
+            submitted = st.form_submit_button(
+                "🎯 Prediksi", width="stretch", type="primary"
+            )
+
+        if submitted:
+            if luas <= 0:
+                st.error("Luas WOK tidak boleh bernilai 0")
+            else:
+                gerai_density = gerai / luas
+
+                input_dict = {
+                    "Revenue": revenue,
+                    "Luas WOK": luas,
+                    "Jumlah Penduduk (Jiwa)": penduduk,
+                    "Jumlah Gerai": gerai,
+                    "Jumlah Mitra": mitra,
+                    "Jumlah Customer Base": cb,
+                    "Total Kecamatan": kecamatan,
+                    "HDI": hdi,
+                    "PDRB": pdrb,
+                    "Gerai Density": gerai_density,
+                }
+
+                input_df = pd.DataFrame(data=[input_dict])[mobile_features]
+                pred_raw = float(model.predict(input_df)[0])
+                pred = int(np.maximum(1, round(pred_raw)))
+
+                st.success(f"Estimasi Kebutuhan Karyawan: **{pred} orang**")
+
+                with st.expander("Detail input yang digunakan"):
+                    st.json(input_dict)
     else:
         feature_cols = [
             "UMR",
