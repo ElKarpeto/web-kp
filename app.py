@@ -6,7 +6,6 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
-# TODO: misal ada library yang mau ditambah monggo ae iki
 from sklearn.model_selection import LeaveOneOut, cross_val_predict
 from sklearn.linear_model import LinearRegression, TweedieRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -16,7 +15,6 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import TransformedTargetRegressor
 
 # ! const data
-# TODO: masukin yang mobile boloo
 MOBILE_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data/mobile/data-web.csv"
 )
@@ -24,7 +22,6 @@ HH_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data/household/data-web.csv"
 )
 
-# TODO: masukin yang mobile boloo
 MOBILE_WOK_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data/mobile/WOK.csv"
 )
@@ -43,7 +40,6 @@ HH_EXCEL = os.path.join(
 
 
 # ! function
-# TODO: misal ada yang mau ditambahin, monggo boloo
 @st.cache_data
 def load_csv(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
@@ -55,9 +51,11 @@ def load_excel(path: str) -> pd.DataFrame:
 
 
 def _clean_wok_label(series: pd.Series) -> pd.Series:
-    # gabung daftar kota multi-baris jadi satu baris "A / B / C"
+    # gabung daftar kota multi-baris jadi satu baris "A - B - C"
     return series.apply(
-        lambda v: " / ".join(s.strip() for s in re.split(r"[\r\n]+", str(v)) if s.strip())
+        lambda v: " - ".join(
+            s.strip() for s in re.split(r"[\r\n]+", str(v)) if s.strip()
+        )
     )
 
 
@@ -206,7 +204,7 @@ def _mobile_wok_coor(data: pd.DataFrame, coor_path):
 
     result = {}
     for cell in data["WOK"].unique():
-        kotas = [_norm_kota(x) for x in str(cell).split(" / ") if x.strip()]
+        kotas = [_norm_kota(x) for x in str(cell).split(" - ") if x.strip()]
         pts = [canon[k] for k in kotas if k in canon]
         if pts:
             result[cell] = (
@@ -287,7 +285,7 @@ st.markdown("Prediksi kebutuhan karyawan per WOK (Wilayah Operasional)")
 
 # select mode
 mode = st.segmented_control(
-    "Sektor", ["📱 Mobile", "🏠 Household"], default="🏠 Household", key="sektor_mode"
+    "Sektor", ["📱 Mobile", "🏠 Household"], default="📱 Mobile", key="sektor_mode"
 )
 
 st.divider()
@@ -343,7 +341,7 @@ with tab1:
         title="Jumlah Karyawan per WOK",
         xaxis_title="WOK",
         yaxis_title="Jumlah Karyawan",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
@@ -371,7 +369,7 @@ with tab1:
         title="UMR per WOK",
         xaxis_title="WOK",
         yaxis_title="UMR (Rupiah)",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
@@ -401,7 +399,7 @@ with tab1:
         title="Luas Wilayah per WOK",
         xaxis_title="WOK",
         yaxis_title="Luas Wilayah (KM²)",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
@@ -431,7 +429,7 @@ with tab1:
         title="Jumlah GraPARI per WOK",
         xaxis_title="WOK",
         yaxis_title="Jumlah GraPARI",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
@@ -463,7 +461,7 @@ with tab1:
         title="Revenue per Karyawan per WOK",
         xaxis_title="WOK",
         yaxis_title="Revenue per Karyawan (Miliar Rupiah)",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
@@ -497,7 +495,7 @@ with tab1:
         title="Customer Base per Karyawan per WOK",
         xaxis_title="WOK",
         yaxis_title="Customer Base per Karyawan (Orang)",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
@@ -531,7 +529,7 @@ with tab1:
         title="Luas Wilayah per Karyawan per WOK",
         xaxis_title="WOK",
         yaxis_title="Luas Wilayah per Karyawan (KM²)",
-        height=600,
+        height=1000,
         hovermode="closest",
         # xaxis=dict(showticklabels=False),
     )
