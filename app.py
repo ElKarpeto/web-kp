@@ -7,12 +7,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from sklearn.model_selection import LeaveOneOut, cross_val_predict
-from sklearn.linear_model import LinearRegression, TweedieRegressor
+from sklearn.linear_model import TweedieRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
-from sklearn.compose import TransformedTargetRegressor
 
 # ! const data
 MOBILE_DATA_PATH = os.path.join(
@@ -51,10 +50,10 @@ def load_excel(path: str) -> pd.DataFrame:
 
 
 def _clean_wok_label(series: pd.Series) -> pd.Series:
-    # gabung daftar kota multi-baris jadi satu baris "A - B - C"
+    # gabung daftar kota multi-baris jadi satu baris "A - B - C" (huruf besar)
     return series.apply(
         lambda v: " - ".join(
-            s.strip() for s in re.split(r"[\r\n]+", str(v)) if s.strip()
+            s.strip().upper() for s in re.split(r"[\r\n]+", str(v)) if s.strip()
         )
     )
 
@@ -109,13 +108,16 @@ def train_loocv(mode, data: pd.DataFrame):
     loo = LeaveOneOut()
 
     if mode == "📱 Mobile":
-        # OLS + Log(Y): StandardScaler -> LinearRegression, target di-log lalu di-exp balik
-        pipeline = TransformedTargetRegressor(
-            regressor=Pipeline(
-                [("scaler", StandardScaler()), ("model", LinearRegression())]
-            ),
-            func=np.log,
-            inverse_func=np.exp,
+        # Tweedie + PCA(4); power & alpha hasil tuning Optuna (lihat tune_mobile_tweedie.py)
+        pipeline = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("pca", PCA(n_components=4)),
+                (
+                    "model",
+                    TweedieRegressor(power=1.9984, alpha=0.14194, max_iter=10000),
+                ),
+            ]
         )
     else:
         pipeline = Pipeline(
@@ -146,12 +148,17 @@ def train_full(mode, data: pd.DataFrame):
     y = data["Jumlah Karyawan"]
 
     if mode == "📱 Mobile":
-        pipeline = TransformedTargetRegressor(
-            regressor=Pipeline(
-                [("scaler", StandardScaler()), ("model", LinearRegression())]
-            ),
-            func=np.log,
-            inverse_func=np.exp,
+        pipeline = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("pca", PCA(n_components=4)),
+                (
+                    "model",
+                    TweedieRegressor(power=1.9984, alpha=0.14194, max_iter=10000),
+                    # TweedieRegressor(power=1.9996, alpha=0.14715, max_iter=10000),
+
+                ),
+            ]
         )
     else:
         pipeline = Pipeline(
@@ -234,13 +241,17 @@ def build_geo_df(labels, aktual, prediksi, wok_coor):
 
 
 def make_map(geo_df, color_col, colorscale="Blues"):
+    # mulai skala warna dari ~30% agar nilai rendah tidak tampak putih
+    color_scale = px.colors.sample_colorscale(
+        colorscale, [0.3 + 0.7 * i / 9 for i in range(10)]
+    )
     fig = px.scatter_map(
         geo_df,
         lat="lat",
         lon="lon",
         size=color_col,
         color=color_col,
-        color_continuous_scale=colorscale,
+        color_continuous_scale=color_scale,
         size_max=35,
         zoom=5,
         center={"lat": -7.8, "lon": 117.5},
@@ -684,13 +695,13 @@ with tab3:
 
             with col_form1:
                 revenue = st.number_input(
-                    "Revenue Mobile (Miliar)",
+                    "Revenue (Miliar)",
                     min_value=0.0,
                     value=float(medians["Revenue"]),
                     step=1.0,
                 )
                 luas = st.number_input(
-                    "Luas WOK (KM²)",
+                    "Luas Wilayah (KM²)",
                     min_value=0.01,
                     value=float(medians["Luas WOK"]),
                     step=1.0,
@@ -704,7 +715,7 @@ with tab3:
 
             with col_form2:
                 gerai = st.number_input(
-                    "Jumlah Gerai (GraPARI)",
+                    "Jumlah GraPARI",
                     min_value=0,
                     value=int(medians["Jumlah Gerai"]),
                     step=1,
@@ -716,7 +727,7 @@ with tab3:
                     step=1,
                 )
                 cb = st.number_input(
-                    "Jumlah _Customer Base_ (Pelanggan)",
+                    "Jumlah _Customer Base_ (Orang)",
                     min_value=0,
                     value=int(medians["Jumlah Customer Base"]),
                     step=1000,
@@ -742,7 +753,7 @@ with tab3:
 
         if submitted:
             if luas <= 0:
-                st.error("Luas WOK tidak boleh bernilai 0")
+                st.error("Luas Wilayah tidak boleh bernilai 0")
             else:
                 gerai_density = gerai / luas
 
