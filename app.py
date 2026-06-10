@@ -115,7 +115,7 @@ def train_loocv(mode, data: pd.DataFrame):
                 ("pca", PCA(n_components=4)),
                 (
                     "model",
-                    TweedieRegressor(power=1.9984, alpha=0.14194, max_iter=10000),
+                    TweedieRegressor(power=1.0000, alpha=0.00015, max_iter=10000),
                 ),
             ]
         )
@@ -154,7 +154,7 @@ def train_full(mode, data: pd.DataFrame):
                 ("pca", PCA(n_components=4)),
                 (
                     "model",
-                    TweedieRegressor(power=1.9984, alpha=0.14194, max_iter=10000),
+                    TweedieRegressor(power=1.0000, alpha=0.00015, max_iter=10000),
                     # TweedieRegressor(power=1.9996, alpha=0.14715, max_iter=10000),
 
                 ),
