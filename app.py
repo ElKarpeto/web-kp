@@ -1,17 +1,17 @@
 import os
 import re
-import streamlit as st
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-
-from sklearn.model_selection import LeaveOneOut, cross_val_predict
+import streamlit as st
+from sklearn.decomposition import PCA
 from sklearn.linear_model import TweedieRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
+from sklearn.model_selection import LeaveOneOut, cross_val_predict
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 # ! const data
 MOBILE_DATA_PATH = os.path.join(
@@ -49,8 +49,7 @@ def load_excel(path: str) -> pd.DataFrame:
     return pd.read_excel(path)
 
 
-def _clean_wok_label(series: pd.Series) -> pd.Series:
-    # gabung daftar kota multi-baris jadi satu baris "A - B - C" (huruf besar)
+def _clean_wok_label(series):
     return series.apply(
         lambda v: " - ".join(
             s.strip().upper() for s in re.split(r"[\r\n]+", str(v)) if s.strip()
@@ -76,7 +75,6 @@ def get_data(mode, uploaded_file):
 @st.cache_data
 def data_prep(mode, data: pd.DataFrame) -> pd.DataFrame:
     if mode == "📱 Mobile":
-        # fitur turunan kepadatan gerai; HDI & PDRB diganti UMR
         data["Gerai Density"] = data["Jumlah Gerai"] / data["Luas WOK"]
         data = data.drop(columns=["HDI", "PDRB"], errors="ignore")
     else:
@@ -108,7 +106,6 @@ def train_loocv(mode, data: pd.DataFrame):
     loo = LeaveOneOut()
 
     if mode == "📱 Mobile":
-        # Tweedie + PCA(4); power & alpha hasil tuning Optuna (lihat tune_mobile_tweedie.py)
         pipeline = Pipeline(
             [
                 ("scaler", StandardScaler()),
@@ -155,8 +152,6 @@ def train_full(mode, data: pd.DataFrame):
                 (
                     "model",
                     TweedieRegressor(power=1.0000, alpha=0.00015, max_iter=10000),
-                    # TweedieRegressor(power=1.9996, alpha=0.14715, max_iter=10000),
-
                 ),
             ]
         )
@@ -283,6 +278,38 @@ def download_excel(mode: str, path: str):
         )
 
 
+def plot_var(data: pd.DataFrame, var_name: str, title: str, mode):
+    var_df = data.sort_values(by=var_name, ascending=False)
+    avg_val = var_df[var_name].mean()
+
+    colors = ["#F59E0B" if value > avg_val else "#3B82F6" for value in var_df[var_name]]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=var_df["WOK"],
+            y=var_df[var_name],
+            hovertemplate=f"<b>%{{x}}</b><br>{title}: %{{y}} Orang<br><extra></extra>",
+            marker_color=colors,
+        )
+    )
+    fig.add_hline(
+        y=avg_val,
+        line_dash="dash",
+        line_color="red",
+        annotation_text=f"Rata-rata: {avg_val:.2f}",
+        annotation_position="top right",
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="WOK",
+        yaxis_title=title,
+        height=700 if mode == "🏠 Household" else 1000,
+        hovermode="closest",
+    )
+    return fig
+
+
 # page config
 st.set_page_config(
     page_title="Workforce Planning — Telkomsel",
@@ -329,153 +356,29 @@ tab1, tab2, tab3 = st.tabs(
 
 with tab1:
     # persebaran karyawan
-    karyawan_df = df.sort_values(by="Jumlah Karyawan", ascending=False)
-    avg_val = karyawan_df["Jumlah Karyawan"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=karyawan_df["WOK"],
-            y=karyawan_df["Jumlah Karyawan"],
-            hovertemplate="<b>%{x}</b><br>"
-            "Jumlah Karyawan: %{y} Orang<br>"
-            "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="Jumlah Karyawan per WOK",
-        xaxis_title="WOK",
-        yaxis_title="Jumlah Karyawan",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
-    )
+    fig = plot_var(df, "Jumlah Karyawan", "Jumlah Karyawan per WOK", mode)
     st.plotly_chart(fig, width="stretch")
 
     # persebaran UMR
-    umr_df = df.sort_values(by="UMR", ascending=False)
-    avg_val = umr_df["UMR"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=umr_df["WOK"],
-            y=umr_df["UMR"],
-            hovertemplate="<b>%{x}</b><br>" "UMR: Rp %{y:.2f}<br>" "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="UMR per WOK",
-        xaxis_title="WOK",
-        yaxis_title="UMR (Rupiah)",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
-    )
+    fig = plot_var(df, "UMR", "UMR per WOK", mode)
     st.plotly_chart(fig, width="stretch")
 
     # persebaran luas wilayah
-    luas_df = df.sort_values(by="Luas WOK", ascending=False)
-    avg_val = luas_df["Luas WOK"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=luas_df["WOK"],
-            y=luas_df["Luas WOK"],
-            hovertemplate="<b>%{x}</b><br>"
-            "Luas Wilayah: %{y:.2f} KM²<br>"
-            "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="Luas Wilayah per WOK",
-        xaxis_title="WOK",
-        yaxis_title="Luas Wilayah (KM²)",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
-    )
+    fig = plot_var(df, "Luas WOK", "Luas Wilayah per WOK", mode)
     st.plotly_chart(fig, width="stretch")
 
     # persebaran grapari
-    gerai_df = df.sort_values(by="Jumlah Gerai", ascending=False)
-    avg_val = gerai_df["Jumlah Gerai"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=gerai_df["WOK"],
-            y=gerai_df["Jumlah Gerai"],
-            hovertemplate="<b>%{x}</b><br>"
-            "Jumlah GraPARI: %{y:.2f}<br>"
-            "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="Jumlah GraPARI per WOK",
-        xaxis_title="WOK",
-        yaxis_title="Jumlah GraPARI",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
-    )
+    fig = plot_var(df, "Jumlah Gerai", "Jumlah GraPARI per WOK", mode)
     st.plotly_chart(fig, width="stretch")
+
+    if mode == "📱 Mobile":
+        fig = plot_var(df, "Jumlah Mitra", "Jumlah Mitra per WOK", mode)
+        st.plotly_chart(fig, width="stretch")
 
     # persebaran revenue per karyawan
     rpe_df = df.copy()
     rpe_df["rpe"] = rpe_df["Revenue"] / rpe_df["Jumlah Karyawan"]
-    rpe_df = rpe_df.sort_values(by="rpe", ascending=False)
-    avg_val = rpe_df["rpe"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=rpe_df["WOK"],
-            y=rpe_df["rpe"],
-            hovertemplate="<b>%{x}</b><br>"
-            "Revenue per Karyawan: %{y:.2f} Miliar<br>"
-            "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="Revenue per Karyawan per WOK",
-        xaxis_title="WOK",
-        yaxis_title="Revenue per Karyawan (Miliar Rupiah)",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
-    )
+    fig = plot_var(rpe_df, "rpe", "Revenue per Karyawan per WOK", mode)
     st.plotly_chart(fig, width="stretch")
 
     # persebaran customer base per karyawan
@@ -483,32 +386,8 @@ with tab1:
     cb_karyawan_df["cb_karyawan"] = (
         cb_karyawan_df["Jumlah Customer Base"] / cb_karyawan_df["Jumlah Karyawan"]
     )
-    cb_karyawan_df = cb_karyawan_df.sort_values(by="cb_karyawan", ascending=False)
-    avg_val = cb_karyawan_df["cb_karyawan"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=cb_karyawan_df["WOK"],
-            y=cb_karyawan_df["cb_karyawan"],
-            hovertemplate="<b>%{x}</b><br>"
-            "Customer Base per Karyawan: %{y:.2f} Orang<br>"
-            "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="Customer Base per Karyawan per WOK",
-        xaxis_title="WOK",
-        yaxis_title="Customer Base per Karyawan (Orang)",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
+    fig = plot_var(
+        cb_karyawan_df, "cb_karyawan", "Customer Base per Karyawan per WOK", mode
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -517,36 +396,10 @@ with tab1:
     luas_karyawan_df["luas_karyawan"] = (
         luas_karyawan_df["Luas WOK"] / luas_karyawan_df["Jumlah Karyawan"]
     )
-    luas_karyawan_df = luas_karyawan_df.sort_values(by="luas_karyawan", ascending=False)
-    avg_val = luas_karyawan_df["luas_karyawan"].mean()
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=luas_karyawan_df["WOK"],
-            y=luas_karyawan_df["luas_karyawan"],
-            hovertemplate="<b>%{x}</b><br>"
-            "Luas Wilayah per Karyawan: %{y:.2f} KM²<br>"
-            "<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=avg_val,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Rata-rata: {avg_val:.2f}",
-        annotation_position="top right",
-    )
-    fig.update_layout(
-        title="Luas Wilayah per Karyawan per WOK",
-        xaxis_title="WOK",
-        yaxis_title="Luas Wilayah per Karyawan (KM²)",
-        height=1000,
-        hovermode="closest",
-        # xaxis=dict(showticklabels=False),
+    fig = plot_var(
+        luas_karyawan_df, "luas_karyawan", "Luas Wilayah per Karyawan per WOK", mode
     )
     st.plotly_chart(fig, width="stretch")
-
-    # grafik dashboard di atas dipakai bersama oleh mode Household & Mobile
 
 with tab2:
     # performa prediksi
@@ -626,15 +479,13 @@ with tab2:
     )
 
     s1, s2 = st.columns(2)
-    s1.metric(
-        "Total Karyawan Saat Ini", int(pred_table["Jumlah Karyawan Saat Ini"].sum())
-    )
-    net = int(pred_table["Jumlah Karyawan Prediksi"].sum()) - int(
-        pred_table["Jumlah Karyawan Saat Ini"].sum()
+    s1.metric("Total Karyawan Saat Ini", np.sum(pred_table["Jumlah Karyawan Saat Ini"]))
+    net = np.sum(pred_table["Jumlah Karyawan Prediksi"]) - np.sum(
+        pred_table["Jumlah Karyawan Saat Ini"]
     )
     s2.metric(
         "Total Prediksi Model",
-        int(pred_table["Jumlah Karyawan Prediksi"].sum()),
+        np.sum(pred_table["Jumlah Karyawan Prediksi"]),
         delta=net,
     )
 
