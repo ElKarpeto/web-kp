@@ -49,21 +49,13 @@ def load_excel(path: str) -> pd.DataFrame:
     return pd.read_excel(path)
 
 
-def _clean_wok_label(series):
-    return series.apply(
-        lambda v: " - ".join(
-            s.strip().upper() for s in re.split(r"[\r\n]+", str(v)) if s.strip()
-        )
-    )
-
-
 def get_data(mode, uploaded_file):
     if mode == "📱 Mobile":
         if uploaded_file is not None:
             data = pd.read_excel(uploaded_file)
         else:
             data = load_csv(MOBILE_DATA_PATH)
-        data["WOK"] = _clean_wok_label(data["WOK"])
+
         return data
 
     if uploaded_file is not None:
@@ -75,10 +67,9 @@ def get_data(mode, uploaded_file):
 @st.cache_data
 def data_prep(mode, data: pd.DataFrame) -> pd.DataFrame:
     if mode == "📱 Mobile":
-        data["Gerai Density"] = data["Jumlah Gerai"] / data["Luas WOK"]
-        data = data.drop(columns=["HDI", "PDRB"], errors="ignore")
+        data["Kepadatan GraPARI"] = data["Jumlah GraPARI"] / data["Luas WOK"]
     else:
-        data["Kepadatan Gerai"] = np.log(data["Jumlah Gerai"] / data["Luas WOK"])
+        data["Kepadatan GraPARI"] = np.log(data["Jumlah GraPARI"] / data["Luas WOK"])
         data["Kepadatan Kepala Keluarga"] = np.log(
             data["Jumlah Kepala Keluarga"] / data["Luas WOK"]
         )
@@ -87,11 +78,12 @@ def data_prep(mode, data: pd.DataFrame) -> pd.DataFrame:
         )
         data = data.drop(
             columns=[
-                "Jumlah Gerai",
+                "Jumlah GraPARI",
                 "Jumlah Kepala Keluarga",
                 "Revenue",
                 "Jumlah Customer Base",
-            ]
+            ],
+            errors="ignore",
         )
 
     return data
@@ -184,36 +176,6 @@ def _wok_coor(path_wok, coor_path):
         wok_coor_dict[w] = (c["Lintang"], c["Bujur"])
 
     return wok_coor_dict
-
-
-# samakan ejaan kota mobile dengan KOTA.csv
-_KOTA_FIX = {"KARANGASEM": "KARANG ASEM", "KOTA SURAKARTA (SOLO)": "KOTA SURAKARTA"}
-
-
-def _norm_kota(s: str) -> str:
-    s = str(s).strip().upper()
-    return _KOTA_FIX.get(s, s)
-
-
-@st.cache_data
-def _mobile_wok_coor(data: pd.DataFrame, coor_path):
-    # koordinat tiap WOK = rata-rata koordinat kota-kotanya (label WOK = "A / B / C")
-    coor = load_csv(coor_path)
-    canon = {
-        _norm_kota(k): (lat, lon)
-        for k, lat, lon in zip(coor["Kota"], coor["Lintang"], coor["Bujur"])
-    }
-
-    result = {}
-    for cell in data["WOK"].unique():
-        kotas = [_norm_kota(x) for x in str(cell).split(" - ") if x.strip()]
-        pts = [canon[k] for k in kotas if k in canon]
-        if pts:
-            result[cell] = (
-                float(np.mean([p[0] for p in pts])),
-                float(np.mean([p[1] for p in pts])),
-            )
-    return result
 
 
 def build_geo_df(labels, aktual, prediksi, wok_coor):
@@ -329,7 +291,7 @@ mode = st.segmented_control(
 st.divider()
 
 st.subheader("Kostomisasi Data")
-st.markdown("Unduh dan Upload templat file excel di bawah ini")
+st.markdown("Unduh dan unggah templat file excel di bawah ini")
 
 # upload file untuk prediksi mandiri
 if mode == "📱 Mobile":
@@ -340,7 +302,7 @@ else:
 uploaded_file = st.file_uploader("Unggah File Excel", type=["xlsx", "xls"])
 
 if uploaded_file is not None:
-    st.success(f"File '{uploaded_file.name}' berhasil di-_upload_!")
+    st.success(f"File '{uploaded_file.name}' berhasil diunggah!")
 
 # data
 df = get_data(mode, uploaded_file)
@@ -368,7 +330,7 @@ with tab1:
     st.plotly_chart(fig, width="stretch")
 
     # persebaran grapari
-    fig = plot_var(df, "Jumlah Gerai", "Jumlah GraPARI per WOK", mode)
+    fig = plot_var(df, "Jumlah GraPARI", "Jumlah GraPARI per WOK", mode)
     st.plotly_chart(fig, width="stretch")
 
     if mode == "📱 Mobile":
@@ -500,7 +462,7 @@ with tab2:
     st.subheader("Peta Prediksi")
 
     if mode == "📱 Mobile":
-        wok_coor = _mobile_wok_coor(df, COOR_PATH)
+        wok_coor = _wok_coor(MOBILE_WOK_PATH, COOR_PATH)
         _geo = build_geo_df(df["WOK"], y_true, np.round(y_pred), wok_coor)
         st.plotly_chart(
             make_map(
@@ -531,13 +493,13 @@ with tab3:
         mobile_features = [
             "Revenue",
             "Luas WOK",
-            "Jumlah Penduduk (Jiwa)",
-            "Jumlah Gerai",
+            "Jumlah Penduduk",
+            "Jumlah GraPARI",
             "Jumlah Mitra",
             "Jumlah Customer Base",
             "Total Kecamatan",
             "UMR",
-            "Gerai Density",
+            "Kepadatan GraPARI",
         ]
         medians = preped_data[mobile_features].median()
 
@@ -560,7 +522,7 @@ with tab3:
                 penduduk = st.number_input(
                     "Jumlah Penduduk (Jiwa)",
                     min_value=0,
-                    value=int(medians["Jumlah Penduduk (Jiwa)"]),
+                    value=int(medians["Jumlah Penduduk"]),
                     step=1000,
                 )
 
@@ -568,7 +530,7 @@ with tab3:
                 gerai = st.number_input(
                     "Jumlah GraPARI",
                     min_value=0,
-                    value=int(medians["Jumlah Gerai"]),
+                    value=int(medians["Jumlah GraPARI"]),
                     step=1,
                 )
                 mitra = st.number_input(
@@ -611,13 +573,13 @@ with tab3:
                 input_dict = {
                     "Revenue": revenue,
                     "Luas WOK": luas,
-                    "Jumlah Penduduk (Jiwa)": penduduk,
-                    "Jumlah Gerai": gerai,
+                    "Jumlah Penduduk": penduduk,
+                    "Jumlah GraPARI": gerai,
                     "Jumlah Mitra": mitra,
                     "Jumlah Customer Base": cb,
                     "Total Kecamatan": kecamatan,
                     "UMR": umr,
-                    "Gerai Density": gerai_density,
+                    "Kepadatan GraPARI": gerai_density,
                 }
 
                 input_df = pd.DataFrame(data=[input_dict])[mobile_features]
@@ -631,7 +593,7 @@ with tab3:
     else:
         feature_cols = [
             "UMR",
-            "Jumlah Gerai",
+            "Jumlah GraPARI",
             "Jumlah Kepala Keluarga",
             "Luas WOK",
             "Revenue",
@@ -666,7 +628,7 @@ with tab3:
                 gerai = st.number_input(
                     "Jumlah GraPARI",
                     min_value=0,
-                    value=int(medians["Jumlah Gerai"]),
+                    value=int(medians["Jumlah GraPARI"]),
                     step=1,
                 )
 
@@ -699,7 +661,7 @@ with tab3:
                 input_dict = {
                     "UMR": np.log(umr),
                     "Luas WOK": luas,
-                    "Kepadatan Gerai": gerai_density,
+                    "Kepadatan GraPARI": gerai_density,
                     "Kepadatan Kepala Keluarga": kk_density,
                     "revenue_cb": revenue_cb,
                 }
