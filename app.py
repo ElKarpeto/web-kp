@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from sklearn.decomposition import PCA
-from sklearn.linear_model import TweedieRegressor
+from sklearn.linear_model import LinearRegression, TweedieRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import LeaveOneOut, cross_val_predict
 from sklearn.pipeline import Pipeline
@@ -98,14 +98,11 @@ def train_loocv(mode, data: pd.DataFrame):
     loo = LeaveOneOut()
 
     if mode == "📱 Mobile":
+        # OLS tanpa PCA: VIF semua fitur Mobile < 10, tidak ada multikolinearitas
         pipeline = Pipeline(
             [
                 ("scaler", StandardScaler()),
-                ("pca", PCA(n_components=4)),
-                (
-                    "model",
-                    TweedieRegressor(power=1.0000, alpha=0.00015, max_iter=10000),
-                ),
+                ("model", LinearRegression()),
             ]
         )
     else:
@@ -137,14 +134,11 @@ def train_full(mode, data: pd.DataFrame):
     y = data["Jumlah Karyawan"]
 
     if mode == "📱 Mobile":
+        # OLS tanpa PCA: VIF semua fitur Mobile < 10, tidak ada multikolinearitas
         pipeline = Pipeline(
             [
                 ("scaler", StandardScaler()),
-                ("pca", PCA(n_components=4)),
-                (
-                    "model",
-                    TweedieRegressor(power=1.0000, alpha=0.00015, max_iter=10000),
-                ),
+                ("model", LinearRegression()),
             ]
         )
     else:
